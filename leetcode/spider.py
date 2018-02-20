@@ -10,6 +10,7 @@ import re
 from config import get_last_url, get_user, update_last_url
 from bs4 import BeautifulSoup
 from requests_toolbelt import MultipartEncoder
+import md2html
 import time
 import codecs
 import os
@@ -21,6 +22,7 @@ user_agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:39.0)' \
     ' Gecko/20100101 Firefox/39.0'
 last_url = base_url + get_last_url()
 user = get_user()
+
 
 class LoginError(Exception):
     pass
@@ -59,6 +61,7 @@ class LeetCodeSpider:
 
     def get_submissions_generator(self, offset=0, gap=20, ac_flag=True):
         fail_count = 0
+        first = True
         while True:
             self.session.headers['Referer'] = submission_url
             r = self.session.get(
@@ -74,6 +77,9 @@ class LeetCodeSpider:
             r_json = r.json()
             submissions_dump = r_json['submissions_dump']
 
+            if first:
+                update_last_url(submissions_dump[0]['url'])
+
             for submission in submissions_dump:
                 if ac_flag:
                     if submission['status_display'] == 'Accepted':
@@ -87,7 +93,6 @@ class LeetCodeSpider:
                 offset += 1
             if r_json['has_next'] is False:
                 break
-
 
     def get_problem_description(self, title):
         '''just get the problem description'''
@@ -107,36 +112,16 @@ class LeetCodeSpider:
             print(e.args)
             time.sleep(1)
             return self.get_problem_and_code(url)
-        
+
         soup = BeautifulSoup(res.text, 'html.parser')
         # problem_title = soup.title.text
         problem_descripton = soup.find(
-            attrs={'name': 'description'})['content']
+            attrs={'name': 'description'})['content'].replace('/r/n', '/n')
         pattern = re.compile(r"submissionCode: '(.*?)'")
         code = re.findall(pattern, res.text)[0]
         code = codecs.decode(code, 'unicode-escape')
         return problem_descripton, code
 
-    def save_md(self):
-        '''save problem and code in markdown file'''
-        submissions = submission_filter(self.get_all_submission())
-        update_last_url(submissions[0]['url'])
-
-        with open('./template.md', 'r') as f:
-                template = f.read()
-        for title in submissions:
-            print('%s saving' % title)
-            lang = submissions[title]['lang']
-            problem, code = self.get_problem_and_code(
-                    base_url + submissions[title]['url'])
-            path = title2path(title)
-            s = template % (title, problem, lang, code)
-            with open(path, 'w') as f:
-                f.write(s.replace('/r/n', '/n'))
-    
-    def get_all_submission(self):
-        return submission_filter(self.get_submission_generator(gap=100))
-    
     def update_md(self, ac_flag=True):
         with open('./template.md', 'r') as f:
                 template = f.read()
@@ -153,26 +138,27 @@ class LeetCodeSpider:
             s = template % (title, problem, lang, code)
             with open(path, 'w') as f:
                 f.write(s.replace('/r/n', '/n'))
-    
-
-def submission_filter(submissions: list):
-    submission_res = {}
-    for submission in submissions:
-        if submission['title'] not in submission_res:
-            submission_res[submission['title']] = submission
-    return submission_res
+        print('Update Successfully!!')
 
 
 def title2path(title: str):
-    return './source/' + title.strip().lower().replace(' ', '-') + '.md'
+    return './md/' + title.strip().lower().replace(' ', '-') + '.md'
 
 
-def test():
+def loginspider():
     spider = LeetCodeSpider()
     spider.login(user['username'], user['password'])
-    spider.update_md()
+    return spider
+
+
+def main():
+    loginspider().update_md()
+    mdfiles = os.listdir('./md')
+    for file in mdfiles:
+        html_name = '%s/%s.html' % ('./html', file[:-3])
+        if not os.path.isdir(file) and not os.path.exists(html_name):
+            md2html.md2html(file)
 
 
 if __name__ == '__main__':
-    pass
-    test()
+    main()
