@@ -23,6 +23,19 @@ user_agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:39.0)' \
 last_url = base_url + get_last_url()
 user = get_user()
 
+with open('./template.md', 'r') as f:
+    template = f.read()
+
+
+def gen_md_text(title, problem, code, lang):
+    date_and_time = time.strftime("%Y-%m-%d %H:%M:%S",
+                                  time.localtime(time.time()))
+    lower_title = title.strip().lower().replace(' ', '-')
+    url=  "https://leetcode.com/problems/%s/description/" % lower_title
+    s = template % (title, date_and_time,
+                    title, url, problem, lang, code)
+    return s
+
 
 class LoginError(Exception):
     pass
@@ -116,28 +129,31 @@ class LeetCodeSpider:
         soup = BeautifulSoup(res.text, 'html.parser')
         # problem_title = soup.title.text
         problem_descripton = soup.find(
-            attrs={'name': 'description'})['content'].replace('/r/n', '/n')
+            attrs={'name': 'description'})['content'].replace('\r\n', '\n')
         pattern = re.compile(r"submissionCode: '(.*?)'")
         code = re.findall(pattern, res.text)[0]
         code = codecs.decode(code, 'unicode-escape')
         return problem_descripton, code
 
     def update_md(self, ac_flag=True):
-        with open('./template.md', 'r') as f:
-                template = f.read()
-
+        unique = set([])
         for submission in self.get_submissions_generator():
             title = submission['title']
             path = title2path(title)
+            if title in unique:
+                continue
+            else: 
+                unique.add(title)
             if os.path.exists(path):
+                print('exist',path)
                 break
             print('%s saving' % title)
             lang = submission['lang']
             problem, code = self.get_problem_and_code(
                     base_url + submission['url'])
-            s = template % (title, problem, lang, code)
+            s = gen_md_text(title, problem, code, lang)
             with open(path, 'w') as f:
-                f.write(s.replace('/r/n', '/n'))
+                f.write(s)
         print('Update Successfully!!')
 
 
@@ -157,7 +173,7 @@ def main():
     for file in mdfiles:
         html_name = '%s/%s.html' % ('./html', file[:-3])
         if not os.path.isdir(file) and not os.path.exists(html_name):
-            md2html.md2html(file)
+            md2html.md2html(file, html_name)
 
 
 if __name__ == '__main__':

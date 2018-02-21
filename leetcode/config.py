@@ -31,6 +31,8 @@ def update_last_url(url):
 def get_last_url():
     return cfg.get('SPIDER', 'last_url')
 
+def get_day():
+    return cfg.get('USER','DAY')
 
 if __name__ == '__main__':
     '''test'''
