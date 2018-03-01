@@ -3,25 +3,24 @@
 Spyder Editor
 
 Spider for LeetCode
-r"""
+"""
 
 import requests
 import re
-from config import get_last_url, get_user, update_last_url
 from bs4 import BeautifulSoup
 from requests_toolbelt import MultipartEncoder
 import md2html
 import time
 import codecs
 import os
+import argparse
+
 
 base_url = 'https://leetcode.com'
 login_url = r'https://leetcode.com/accounts/login/'
 submission_url = r'https://leetcode.com/submissions/'
 user_agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:39.0)' \
     ' Gecko/20100101 Firefox/39.0'
-last_url = base_url + get_last_url()
-user = get_user()
 
 with open('./template.md', 'r') as f:
     template = f.read()
@@ -72,41 +71,6 @@ class LeetCodeSpider:
         del(self.session.headers['Content-Type'])
         del(self.session.headers['Content-Length'])
 
-    def get_submissions_generator(self, offset=0, gap=20, ac_flag=True):
-        fail_count = 0
-        first = True
-        while True:
-            self.session.headers['Referer'] = submission_url
-            r = self.session.get(
-                'https://leetcode.com/api/submissions/',
-                params={'offset': str(offset), 'limit': str(gap)})
-
-            if r.status_code != requests.status_codes.codes.ok:
-                print('get fail and state code is ', r.status_code)
-                fail_count += 1
-                if fail_count > 10:
-                    print('fail count > 10')
-                    break
-            r_json = r.json()
-            submissions_dump = r_json['submissions_dump']
-
-            if first:
-                update_last_url(submissions_dump[0]['url'])
-
-            for submission in submissions_dump:
-                if ac_flag:
-                    if submission['status_display'] == 'Accepted':
-                        yield submission
-                else:
-                    yield submission
-                if submission['url'] == last_url:
-                    r_json['has_next'] = False
-                    break
-
-                offset += 1
-            if r_json['has_next'] is False:
-                break
-
     def get_problem_description(self, title):
         '''just get the problem description'''
         t = title.strip().lower().replace(' ', '-')
@@ -136,17 +100,14 @@ class LeetCodeSpider:
         return problem_descripton, code
 
     def update_md(self, ac_flag=True):
-        unique = set([])
-        for submission in self.get_submissions_generator():
-            title = submission['title']
+        ac = self.get_all_ac_problem()
+        for title, problem in ac.items():
             path = title2path(title)
-            if title in unique:
-                continue
-            else: 
-                unique.add(title)
             if os.path.exists(path):
                 print('exist',path)
-                break
+                continue
+            slug = ac[title]['stat']['question__title_slug']
+            submission = self.get_submission(slug)
             print('%s saving' % title)
             lang = submission['lang']
             problem, code = self.get_problem_and_code(
@@ -156,14 +117,56 @@ class LeetCodeSpider:
                 f.write(s)
         print('Update Successfully!!')
 
+    def islogin(self, username):
+        url = 'https://leetcode.com/api/problems/all/'
+        res = self.get(url)
+        return res.json()['username'] == username
+
+    def get(self,url):
+        self.session.headers['Referer'] = url
+        return self.session.get(url)
+    
+    def get_submission(self, title):
+        url = 'https://leetcode.com/api/submissions/%s' % title
+        fail_count = 0
+        offset, gap = 0, 10
+        while True:
+            r = self.session.get(
+                    url,
+                    params={'offset': str(offset), 'limit': str(gap)})
+            if r.status_code != requests.status_codes.codes.ok:
+                print('get fail and state code is ', r.status_code)
+                fail_count += 1
+                if fail_count > 10:
+                    print('fail count > 10')
+                    break
+                continue
+            
+            r_json = r.json()
+            submissions_dump = r_json['submissions_dump']
+            for submission in submissions_dump:
+                if submission['status_display'] == 'Accepted':
+                        return submission
+            offset += gap
+
+
+    def get_all_ac_problem(self):
+        url = 'https://leetcode.com/api/problems/all'
+        res = self.get(url)
+        problems = res.json()['stat_status_pairs']
+        ac = {}
+        for problem in problems:
+            if problem['status'] == 'ac':
+                ac[problem['stat']['question__title']] = problem
+        return ac
 
 def title2path(title: str):
-    return './md/' + title.strip().lower().replace(' ', '-') + '.md'
+    return './md/' + title.strip().replace(' ', '-') + '.md'
 
 
-def loginspider():
+def loginspider(username, passwd):
     spider = LeetCodeSpider()
-    spider.login(user['username'], user['password'])
+    spider.login(username, passwd)
     return spider
 
 
@@ -175,6 +178,25 @@ def main():
         if not os.path.isdir(file) and not os.path.exists(html_name):
             md2html.md2html(file, html_name)
 
+def parse_arg():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-u", "-username", help='username',
+                        type = str, dest='username', required=True)
+    parser.add_argument("-p", "-passwd", help='password',
+                        type = str, dest='passwd', required=True)
+    parser.add_argument("-update", type=str, help='update', dest="update", 
+                        choices=['md', 'html'])
+    return parser.parse_args()
+
 
 if __name__ == '__main__':
-    main()
+    args = parse_arg()
+    print(args)
+    spider = loginspider(args.username, args.passwd)
+    spider.update_md()
+    if args.update == 'html':
+        for file in mdfiles:
+            html_name = '%s/%s.html' % ('./html', file[:-3])
+            if not os.path.isdir(file) and not os.path.exists(html_name):
+                md2html.md2html(file, html_name)
+    
